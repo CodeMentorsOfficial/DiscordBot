@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const Discord = require('discord.js');
 
 var applications = false;
