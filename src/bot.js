@@ -40,7 +40,10 @@ client.on('ready', () => {
         channel.send("Bot restarted.");
     }
     client.user.setActivity(`Prefix ${prefix}`, { type: 'WATCHING' })
-    .catch(console.error);
+        .catch(console.error);
+    client.user.setStatus('dnd')
+        .catch(console.error);
+    // Final line of code .. display ready in log
     console.log(`The bot has logged in as ${client.user.tag}`);
 });
 
