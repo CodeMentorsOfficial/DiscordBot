@@ -39,6 +39,8 @@ client.on('ready', () => {
     if (channel != null){
         channel.send("Bot restarted.");
     }
+    client.user.setActivity(`Prefix ${prefix}`, { type: 'WATCHING' })
+    .catch(console.error);
     console.log(`The bot has logged in as ${client.user.tag}`);
 });
 
