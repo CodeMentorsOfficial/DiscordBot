@@ -18,7 +18,8 @@ module.exports.c = [
     "cmds",
     "alliases",
     "help",
-    "announcement"
+    "announcement",
+    "change
 ]
 
 console.log("c.js loaded... Success!");
