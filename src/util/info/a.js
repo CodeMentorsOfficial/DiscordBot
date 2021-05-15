@@ -18,7 +18,8 @@ module.exports.a = {
     "cmds" : ["commands"],
     "alliases" : ["als"],
     "help" : [],
-    "announcement" : ["announce", "shout", "important"]
+    "announcement" : ["announce", "shout", "important"],
+    "change" : ["alter","settings"]
 }
 
 console.log("a.js loaded... Success!");
