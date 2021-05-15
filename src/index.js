@@ -2,7 +2,6 @@ require('dotenv').config();
 
 const Discord = require('discord.js');
 const ytdl = require('ytdl-core');
-const search = require('youtube-search');
 
 const client = new Discord.Client();
 var connectedGuilds = {};
@@ -15,6 +14,8 @@ const cmdCommands = c;
 
 // Import utils
 const error = require('./util/error');
+const CMembed = require('./util/CMembed');
+const asyncObj = require('./util/asyncObj')
 
 // Commands
 const commands = require('./commands')
@@ -25,9 +26,9 @@ function addGuild(guild){
     var set = new Object();
     set.applications = false;
     set.selApplications = false;
-    set.selApplicationLink = "Error code 2: Contact someone with the @Admin or @Mentor role.";
+    set.selApplicationLink = "Error code 2 : 'Selected' Application link not set.";
     set.selRole = null;
-    set.applicationLink = "Error code 2: Contact someone with the @Admin or @Mentor role.";  
+    set.applicationLink = "Error code 2: Application link not set.";  
     set.prefix = "//";   
     set.queue = []; // music queue
     set.isPlaying = false;
@@ -35,6 +36,7 @@ function addGuild(guild){
     set.connection = null;
     set.songAnnouncement = true;
     set.dispatcher = null;
+    set.commandLogChannel = 'default'; // First text channel found in the server
     connectedGuilds[guild.id] = set;
     console.log(`[Guild ${guild.id}]: Added to connections.`);
 }
@@ -79,6 +81,7 @@ function displayAlliases(message, page){
 function isAdmin(id, message){
     try{
         const guild = message.guild;
+        if (id == guild.owner.id) return true; // The owner is permanent admin for their server.
         const admin = connectedGuilds[guild.id].adminRole;
         var adminRole = null;
         if (typeof(admin) === 'string'){
@@ -86,7 +89,7 @@ function isAdmin(id, message){
         } else {
             adminRole = admin;
         }
-        if(adminRole == null) {
+        if(adminRole == null) { // Will return false if the role has not been set.
             return false;
         }
         if (message.member.roles.highest.position >= adminRole.position){
@@ -239,8 +242,12 @@ commands(Discord, client, connectedGuilds, (message, command) => {
             // Used for embeds, timestamp
             var d = new Date();
 
+            // Whether a command was found or not
+            var logCommand = false;
+
             // Play command
             if (command == "play"){
+                logCommand = true;
                 if (message.member.voice.channel){
                     if(self != null){
                         if(self.voice.channel != message.member.voice.channel){                                                                                    // New command
@@ -276,8 +283,9 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                         embed.addField("\u2800", "Error Code: 14");
                         embed.setFooter("Error: YouTube URL required")
                         message.channel.send(embed);
-                        console.log("Error Code 14 called, URL required for playing music.")
+                        console.log("Error Code 14 called, YouTube URL required for playing music.")
                     });
+                    return;
                 }
                 connectedGuilds[message.guild.id].queue.push(URL);
                 playMusic(message);
@@ -285,6 +293,7 @@ commands(Discord, client, connectedGuilds, (message, command) => {
 
             // Queue command
             if (command == "queue"){
+                logCommand = true;
                 const page = message.content.split(" ")[1] || '1';
                 displayQueue(message, page);
                 return;
@@ -292,6 +301,7 @@ commands(Discord, client, connectedGuilds, (message, command) => {
 
             // Skip song command
             if (command == "skip") {
+                logCommand = true;
                 if (self == null) return;
                 if (message.member.voice.channel){
                     if(self.voice.channel == message.member.voice.channel){
@@ -307,8 +317,14 @@ commands(Discord, client, connectedGuilds, (message, command) => {
 
             // Join voice channel command
             if (command == "join"){
+                logCommand = true;
                 try{
-                    message.member.voice.channel.join().catch(function(){
+                    message.member.voice.channel.join().then( () => {
+                        CMembed(Discord, client, embed => {
+                            embed.addField("\u2800", `Joined and bound bot to ${message.member.voice.channel}`, false);
+                            message.channel.send(embed);
+                        });
+                    }).catch(function(){
                         error(Discord,client,message, embed => {
                             embed.addField("\u2800", "Error Code: 11");
                             message.channel.send(embed);
@@ -329,9 +345,10 @@ commands(Discord, client, connectedGuilds, (message, command) => {
 
             // Leave voice channel command
             if (command == "leave"){
+                logCommand = true;
                 if (self == null) return;
                 if (message.member.voice.channel){
-                    if(self.voice.channel != message.member.voice.channel){                                                                                    // New command
+                    if(self.voice.channel != message.member.voice.channel || self.voice.channel == null){                                                                                    // New command
                         error(Discord,client,message, embed => {
                             embed.addField("\u2800", "Error Code: 11");
                             message.channel.send(embed);
@@ -339,6 +356,12 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                         });
                         return;
                     }
+                } else {
+                    error(Discord,client,message, embed => {
+                        embed.addField("\u2800", "Error Code: 11");
+                        message.channel.send(embed);
+                        console.log("Error Code 11 called, attempting to make bot leave channel : not in voice channel.");
+                    });
                 }
                 self.voice.kick();
                 return;
@@ -346,12 +369,14 @@ commands(Discord, client, connectedGuilds, (message, command) => {
 
             // Alias command
             if (command == "alliases") {
+                logCommand = true;
                 const page = message.content.split(" ")[1] || '1';
                 displayAlliases(message,page);
             }
 
             // Show commands command
             if (command == "cmds"){
+                logCommand = true;
                 var sCommands = "";
                 var page = message.content.split(" ")[1] || '1';
                 try{
@@ -364,22 +389,221 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                         sCommands = "[empty]";
                     }
         
-                    const embed = new Discord.MessageEmbed()
-                    .setTitle(`Commands | Page ${page}`)
-                    .setColor(0x3286a6)
-                    .setTimestamp(d.toISOString())
-                    .setAuthor(`${self.user.tag}`, self.user.avatarURL({size : 256}))
-                    .setFooter(`Say ${connectedGuilds[message.guild.id].prefix}cmds [page number]`)
-                    .addField("\u2800", sCommands, false);
-
-                    message.channel.send(embed);
+                    CMembed(Discord,client, embed => {
+                        embed.setTitle(`Commands | Page ${page}`);
+                        embed.setFooter(`Say ${connectedGuilds[message.guild.id].prefix}cmds [page number]`);
+                        embed.addField("\u2800", sCommands, false);
+                        message.channel.send(embed);
+                    });
                 } catch (err) {
                     console.log(err);
                 }
             }
 
             // Open apps command
-            if(command == "openapps" || command == "closeapps" || command == "say" || command == "announcement" || command == "verify" || command == "apply" || command == "help"){
+            if (command == "openapps" && isAdmin(message.author.id, message)){
+                logCommand = true;
+                const guild = message.guild;
+                if (connectedGuilds[guild.id].applications == true){
+                    error(Discord, client, message, embed => {
+                        embed.addField("\u2800", "Application is already open : limit of 1 open per server.", false);
+                        message.channel.send(embed);
+                    });
+                    return;
+                }
+                const appTitle = "Application";
+                const appURL = message.content.split(" ")[1] || connectedGuilds[guild.id].applicationLink;
+                CMembed(Discord, client, embed => {
+                    embed.addField("\u2800", appURL, false);
+                    embed.setDescription("This is what your applicant will see.");
+                    embed.setFooter("Application opened at")
+                    embed.setTitle(appTitle);
+                    message.channel.send(embed);
+                });
+                connectedGuilds[guild.id].applicationLink = appURL;
+                connectedGuilds[guild.id].applications = true;
+            }
+
+            // Close apps command
+            if (command == "closeapps" && isAdmin(message.author.id, message)){
+                logCommand = true;
+                const guild = message.guild;
+                if (connectedGuilds[guild.id].applications == false){
+                    error(Discord,client,message, embed => {
+                        embed.addField("\u2800", "Applications are not open : no applications to close.", false);
+                        message.channel.send(embed);
+                    });
+                    return;
+                }
+                CMembed(Discord,client,embed => {
+                    embed.addField("\u2800", `Application closed by ${message.member}`,false);
+                    embed.setFooter("Application closed at");
+                    embed.setTitle("Application closed");
+                    message.channel.send(embed);
+                });
+                connectedGuilds[guild.id].applicationLink = "Error code 2 : Application link not set.";
+                connectedGuilds[guild.id].applications = false;
+            }
+
+            // Apply command
+            if (command == "apply"){
+                logCommand = true;
+                CMembed(Discord,client,embed => {
+                    embed.setTitle("Application");
+                    embed.setDescription(connectedGuilds[guild.id].applicationLink);
+                    message.author.send(embed);
+                });
+            }
+
+            //Change command
+            if (command == "change" && isAdmin(message.author.id, message)){
+                logCommand = true;
+                var changeType = message.content.split(" ")[1] || null;
+                if (changeType != null){
+                    const guild = message.guild;
+                    changeType = changeType.toLowerCase();
+                    // Prefix
+                    if(changeType == 'prefix'){
+                        const newPrefix = message.content.split(" ")[2] || null;
+                        if (newPrefix == null) {
+                            error(Discord,client,_,embed => {
+                                embed.addField("\u2800","Error Code: 404", false);
+                                message.channel.send(embed);
+                            });
+                            return;
+                        }
+                        if(newPrefix.length == 1) {
+                            connectedGuilds[guild.id].prefix = newPrefix;
+                            CMembed(Discord,client,embed => {
+                                embed.setDescription(`New prefix set: ${newPrefix}`);
+                                message.channel.send(embed);
+                            });
+                        } else {
+                            error(Discord,client,_,embed => {
+                                embed.addField("\u2800","Prefix must be 1 character in length", false);
+                                message.channel.send(embed);
+                            });
+                            return;
+                        }
+                    }
+                    
+                    // Log Channel
+                    if(changeType == 'log') {
+                        var newChannel = message.content.split(" ")[2] || null;
+                        if (newChannel == null) {
+                            error(Discord,client,_,embed => {
+                                embed.addField("\u2800","Error Code: 404", false);
+                                message.channel.send(embed);
+                            });
+                            return;
+                        }
+                        if(newChannel.search("#") == -1) { // id
+                            connectedGuilds[guild.id].commandLogChannel = newChannel;
+                            CMembed(Discord,client,embed => {
+                                embed.setDescription(`New log channel set: ${newChannel}`);
+                                message.channel.send(embed);
+                            });
+                        } else {
+                            newChannel = newChannel.replace("<#","");
+                            newChannel = newChannel.replace(">","");
+                            newChannel = newChannel.replace("#","");
+                            try {
+                                connectedGuilds[guild.id].commandLogChannel = newChannel;
+                                CMembed(Discord,client,embed => {
+                                    embed.setDescription(`New log channel set: ${newChannel}`);
+                                    message.channel.send(embed);
+                                });
+                            } catch (err) {
+                                error(Discord,client,null,embed => {
+                                    embed.addField("\u2800","Error Code: 404", false);
+                                    message.channel.send(embed);
+                                });
+                                console.log(err);
+                                return;
+                            }
+                        }
+                    }
+
+                    // Admin Role
+                    if(changeType == 'admin') {
+                        var newAdmin = message.content.split(" ")[2] || null;
+                        if (newAdmin == null) {
+                            error(Discord,client,null,embed => {
+                                embed.addField("\u2800","Error Code: 404", false);
+                                message.channel.send(embed);
+                            });
+                            return;
+                        }
+                        if(newAdmin.search("@") == -1) { // id
+                            connectedGuilds[guild.id].adminRole = newAdmin;
+                            CMembed(Discord,client,embed => {
+                                embed.setDescription(`New admin role set: ${newAdmin}`);
+                                message.channel.send(embed);
+                            });
+                        } else {
+                            newAdmin = newAdmin.replace("<@&","");
+                            newAdmin = newAdmin.replace(">","");
+                            newAdmin = newAdmin.replace("@","");
+                            try {
+                                newAdmin = parseInt(newAdmin);
+                                connectedGuilds[guild.id].adminRole = newAdmin.toString();
+                                CMembed(Discord,client,embed => {
+                                    embed.setDescription(`New admin role set: ${newAdmin}`);
+                                    message.channel.send(embed);
+                                });
+                            } catch (err) {
+                                error(Discord,client,null,embed => {
+                                    embed.addField("\u2800","Error Code: 404", false);
+                                    message.channel.send(embed);
+                                });
+                                console.log(err);
+                                return;
+                            }
+                        }
+                    }
+                } else {
+                    CMembed(Discord,client,embed => {
+                        embed.setTitle("Settings to change");
+                        const settings = "1. prefix (server prefix)\n2. log (logging channel)\n3. admin (bot admin role)";
+                        embed.addField("\u2800", settings, false);
+                        message.channel.send(embed);
+                        return;
+                    });
+                }
+            }
+
+
+            /* IF A COMMAND WAS USED, LOG IT TO THE SERVER'S LOGGING CHANNEL */
+            if(logCommand) {
+                message.delete();
+                if(connectedGuilds[message.guild.id].commandLogChannel == 'default'){
+                    var channel = message.guild.channels.cache.filter(chx => chx.type === "text").find(x => x.position === 0) || null;
+                    if (channel == null) { // no text channels found
+                        return;
+                    }
+                    CMembed(Discord,client,embed => {
+                        embed.setAuthor(message.author.tag, message.author.avatarURL({size : 256}));
+                        embed.setDescription(`Command used in ${message.channel}`);
+                        embed.addField("\u2800", message.content, false);
+                        channel.send(embed);
+                    });
+                } else {
+                    const channel = message.guild.channels.cache.get(connectedGuilds[message.guild.id].commandLogChannel);
+                    if (channel == null){
+                        return;
+                    }
+                    CMembed(Discord,client,embed => {
+                        embed.setAuthor(message.author.tag, message.author.avatarURL({size : 256}));
+                        embed.setDescription(`Command used in ${message.channel}`);
+                        embed.addField("\u2800", message.content, false);
+                        channel.send(embed);
+                    });
+                }
+            }
+
+
+
+            if(command == "say" || command == "announcement" || command == "verify" || command == "help"){
                 error(Discord,client,message, embed => {
                     embed.setTitle("Command not available");
                     embed.setFooter("Command being developed");
@@ -397,4 +621,4 @@ client.on("guildCreate", guild => {
     addGuild(guild);
 });
 
-client.login(process.env.DISCORD_BOT_TOKEN); // Replace with token, hardcoding not recommended
+client.login(process.env.DISCORD_BOT_TOKEN);
