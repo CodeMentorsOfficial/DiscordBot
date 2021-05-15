@@ -108,6 +108,13 @@ module.exports = (Discord, client, connectedGuilds, callback) => {
             }
         });
 
+        // Change
+        aliases(prefix, message.content.split(" ")[0].toLowerCase(), "change", result => {
+            if(result){
+                callback(message, 'change');
+            }
+        });
+
         callback(message, "null");
     });
 }
