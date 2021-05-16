@@ -7,3 +7,7 @@ This bot is available for invite to any server, limited hosting capacity : [avai
 - This bot is under development. Some key features are implemented.
 - This bot is occasionally online. No official hosting service has been selected for use.
 - Requires administrator permissions
+
+
+# Contact
+[Discord](https://discord.gg/mUNtDtD4dP)
