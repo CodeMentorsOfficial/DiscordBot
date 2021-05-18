@@ -16,9 +16,10 @@ module.exports.a = {
     "say" : [],
     "verify" : ["verifyme"],
     "cmds" : ["commands"],
-    "alliases" : ["als"],
+    "aliases" : ["als"],
     "help" : [],
     "announcement" : ["announce", "shout", "important"],
+    "progupdate" : ["programupdate", "pupdate", "pannounce", "pannouncement"],
     "change" : ["alter","settings"]
 }
 
