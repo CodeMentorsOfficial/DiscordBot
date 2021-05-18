@@ -59,6 +59,13 @@ module.exports = (Discord, client, connectedGuilds, callback) => {
             }
         });
 
+        // Program update (announcement)
+        aliases(prefix, message.content.split(" ")[0].toLowerCase(), "progupdate", result => {
+            if(result){
+                callback(message, 'progupdate');
+            }
+        });
+
         // Verify
         aliases(prefix, message.content.split(" ")[0].toLowerCase(), "verify", result => {
             if(result){
@@ -74,9 +81,9 @@ module.exports = (Discord, client, connectedGuilds, callback) => {
         });
 
         // Aliases
-        aliases(prefix, message.content.split(" ")[0].toLowerCase(), "alliases", result => {
+        aliases(prefix, message.content.split(" ")[0].toLowerCase(), "aliases", result => {
             if(result){
-                callback(message, 'alliases');
+                callback(message, 'aliases');
             }
         });
 
