@@ -12,13 +12,17 @@ const cmdAliases = a;
 const {c} = require('./util/info/c')
 const cmdCommands = c;
 
+// Dependencies
+const request = require('request');
+
 // Import utils
 const error = require('./util/error');
 const CMembed = require('./util/CMembed');
 const asyncObj = require('./util/asyncObj')
 
-// Commands
+// Import command modules
 const commands = require('./commands')
+const checkCommands = require('./util/checkCommand')
 
 // Functions
 
@@ -31,12 +35,14 @@ function addGuild(guild){
     set.applicationLink = "Error code 2: Application link not set.";  
     set.prefix = "//";   
     set.queue = []; // music queue
+    set.displayQueue = []; // music queue
     set.isPlaying = false;
     set.adminRole = null;
     set.connection = null;
     set.songAnnouncement = true;
     set.dispatcher = null;
     set.commandLogChannel = 'default'; // First text channel found in the server
+    set.commandsLog = true; // default
     connectedGuilds[guild.id] = set;
     console.log(`[Guild ${guild.id}]: Added to connections.`);
 }
@@ -117,8 +123,17 @@ function isURL(str) {
 function playMusic(message){
     const vc = message.member.voice.channel || null;
     if(vc == null) return;
-    if (connectedGuilds[message.guild.id].queue.length == 0 || connectedGuilds[message.guild.id].isPlaying) return;
+    if (connectedGuilds[message.guild.id].isPlaying) return;
+    if(connectedGuilds[message.guild.id].queue.length == 0){
+        client.guilds.fetch(message.guild.id).then(async guild => {
+            await guild.members.fetch(client.user.id).then(async self => {
+                message.channel.send("Queue empty.");
+                self.voice.kick();
+            });
+        });
+    }
     try {
+        const showJoinMessage = (connectedGuilds[message.guild.id].dispatcher == null) ? true : false;
         connectedGuilds[message.guild.id].connection = vc.join().then(async connection =>{
             const stream = ytdl(connectedGuilds[message.guild.id].queue[0], { filter: 'audioonly' });
             connectedGuilds[message.guild.id].isPlaying = true;
@@ -141,6 +156,12 @@ function playMusic(message){
                 message.channel.send(embed);
             }
             try{
+                if (showJoinMessage) {
+                    CMembed(Discord, client, embed => {
+                        embed.addField("\u2800", `Joined and bound bot to ${message.member.voice.channel}`, false);
+                        message.channel.send(embed);
+                    });
+                }
                 connectedGuilds[message.guild.id].dispatcher = connection.play(stream);
             } catch (err) {
                 error(Discord,client,message, embed => {
@@ -172,34 +193,37 @@ function playMusic(message){
     }
 }
 
+function isMyGuild(message){
+    const guild = message.guild;
+    if (guild.id == '823487710068080690') {
+        return true;
+    }
+    return false;
+}
+
 function displayQueue(message, p){
     var d = new Date();
-    var tQueue = "";
 
     message.channel.send("Fetching queue...").then(async msg  => {
-        var page;
+        let page;
         try{
             page = parseInt(p);
-            for (i = ((parseInt(page)-1) * 10); i < connectedGuilds[message.guild.id].queue.length; i++){
-                if ((parseInt(page) * 10)-1 == i) {
-                    break;
-                }
-                const song = connectedGuilds[message.guild.id].queue[i];
-                try{
-                    const songTitle = await ytdl.getInfo(song).then(info => {
-                        return info.videoDetails.title;
-                    })
-                    tQueue = tQueue + `${i+1}: [${songTitle}](${song})\n`;
-                } catch (err){
-                    console.log(err);
-                }
+            
+            var tQueue = "";
+            const tdisplayQueue = connectedGuilds[message.guild.id].displayQueue;
+            console.log(`Display queue: ${tdisplayQueue}`);
+
+            for (i = (page-1)*10; i < tdisplayQueue.length; i++){
+                if(i === page * 10) break;
+                tQueue = tQueue + `${i+1}: ${tdisplayQueue[i]}`;
             }
-        
-            if(tQueue == ""){
-                tQueue = "[empty]"
+
+            if(tQueue.length === 1){
+                tQueue = "[empty]";
             }
+
+            // Show gathered queue
         
-            // Used for music commands
             self = client.user;
         
             const embed = new Discord.MessageEmbed()
@@ -238,7 +262,7 @@ client.on('message', message => {
 commands(Discord, client, connectedGuilds, (message, command) => {
 
     client.guilds.fetch(message.guild.id).then(async guild => {
-        await guild.members.fetch(client.user.id).then(self => {
+        await guild.members.fetch(client.user.id).then(async self => {
             // Used for embeds, timestamp
             var d = new Date();
 
@@ -276,9 +300,9 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                     });
                     return;
                 }
-                var URL = message.content.split(" ")[1] || "empty"; // If empty, the playMusic function should skip over it.
+                var URL = message.content.split(" ")[1] || "&*-_empty(1@3"; // If empty, the playMusic function should skip over it.
 
-                if (!isURL(URL)){
+                if (URL == "&*-_empty(1@3") {
                     error(Discord,client,message, embed => {
                         embed.addField("\u2800", "Error Code: 14");
                         embed.setFooter("Error: YouTube URL required")
@@ -287,8 +311,40 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                     });
                     return;
                 }
-                connectedGuilds[message.guild.id].queue.push(URL);
-                playMusic(message);
+                if (!isURL(URL)){
+                    
+                    var query = message.content.split(" ");
+                    query.splice(0,1);
+                    query = query.join("+")
+                    const queryURL = `https://www.youtube.com/results?search_query=${query}`;
+                    console.log(queryURL);
+                    request(queryURL, async (error, response, body) => {
+                        // console.error(error);
+                        var firstVideoIndex = body.toLowerCase().indexOf('watch?v=');
+                        const videoId = body.substr(firstVideoIndex, firstVideoIndex+19);
+                        const link = `https://www.youtube.com/${videoId.split('"')[0].split("\\u0026")[0]}`;
+                        console.log(`Link: ${link}`);
+                        connectedGuilds[message.guild.id].queue.push(link);
+
+                        console.log("Starting display log...")
+                        await ytdl.getInfo(link).then(info => {
+                            connectedGuilds[message.guild.id].displayQueue.push(`[${info.videoDetails.title}](${link})\n`);
+                            console.log(`Adding song to display queue: ${link}`);
+                        })
+                        console.log("Ending display log...")
+
+                        playMusic(message);
+                    });
+                } else {
+                    connectedGuilds[message.guild.id].queue.push(URL);
+                    console.log("Starting display log...")
+                        await ytdl.getInfo(URL).then(info => {
+                            connectedGuilds[message.guild.id].displayQueue.push(`[${info.videoDetails.title}](${URL})\n`);
+                            console.log(`Adding song to display queue: ${URL}`);
+                        })
+                        console.log("Ending display log...")
+                    playMusic(message);
+                }
             }
 
             // Queue command
@@ -296,7 +352,6 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                 logCommand = true;
                 const page = message.content.split(" ")[1] || '1';
                 displayQueue(message, page);
-                return;
             }
 
             // Skip song command
@@ -307,12 +362,20 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                     if(self.voice.channel == message.member.voice.channel){
                         connectedGuilds[message.guild.id].isPlaying = false;
                         connectedGuilds[message.guild.id].queue.splice(0,1);
-                        connectedGuilds[message.guild.id].isPlaying = false;
                         playMusic(message);  
                         message.channel.send("Skipped!")
                     }
                 }
-                return;
+            }
+
+            // Pause command
+            if (command == "pause") {
+                error(Discord,client,null, embed => {
+                    embed.addField("\u2800", "Pause command not added.", false);
+                    embed.setFooter("Resuming paused song faulty");
+                    message.channel.send(embed);
+                });
+                // Won't log, return not required.
             }
 
             // Join voice channel command
@@ -340,7 +403,6 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                     });
                     return;
                 }
-                return;
             }
 
             // Leave voice channel command
@@ -348,7 +410,8 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                 logCommand = true;
                 if (self == null) return;
                 if (message.member.voice.channel){
-                    if(self.voice.channel != message.member.voice.channel || self.voice.channel == null){                                                                                    // New command
+                    if(self.voice.channel != message.member.voice.channel || self.voice.channel == null){ 
+                        connectedGuilds[message.guild.id].queue = [];                                                             // New command
                         error(Discord,client,message, embed => {
                             embed.addField("\u2800", "Error Code: 11");
                             message.channel.send(embed);
@@ -362,13 +425,14 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                         message.channel.send(embed);
                         console.log("Error Code 11 called, attempting to make bot leave channel : not in voice channel.");
                     });
+                    return;
                 }
                 self.voice.kick();
-                return;
+                connectedGuilds[message.guild.id].dispatcher = null;
             }
 
             // Alias command
-            if (command == "alliases") {
+            if (command == "aliases") {
                 logCommand = true;
                 const page = message.content.split(" ")[1] || '1';
                 displayAlliases(message,page);
@@ -486,6 +550,42 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                             return;
                         }
                     }
+
+                    // Commands log to a channel (true / false)
+                    if(changeType == 'logcommands'){
+                        const newValue = message.content.split(" ")[2] || null;
+                        if (newValue == null) {
+                            error(Discord,client,_,embed => {
+                                embed.addField("\u2800","Error Code: 404", false);
+                                message.channel.send(embed);
+                            });
+                            return;
+                        }
+                        if(newValue.toLowerCase() == 'true') {
+                            connectedGuilds[guild.id].commandsLog = true;
+                            CMembed(Discord,client,embed => {
+                                var channel = message.guild.channels.cache.filter(chx => chx.type === "text").find(x => x.position === 0) || null;
+                                const newChannel = (connectedGuilds[guild.id].commandLogChannel == 'default') ? (channel.id || "Err: no channel found") : connectedGuilds[guild.id].commandLogChannel;
+                                embed.setDescription(`Commands now log to ${newChannel}`);
+                                embed.setFooter('Command logging : true');
+                                message.channel.send(embed);
+                            });
+                        } else if (newValue.toLowerCase() == 'false') {
+                            connectedGuilds[guild.id].commandsLog = false;
+                            CMembed(Discord,client,embed => {
+                                embed.setDescription(`Commands will not be logged`);
+                                embed.setFooter('Command logging : false');
+                                message.channel.send(embed);
+                            });
+                        } else {
+                            error(Discord,client,null,embed => {
+                                embed.addField("\u2800","logcommands value must either be 'true' or 'false'", false);
+                                embed.addField("\u2800", "Case does not matter", false);
+                                message.channel.send(embed);
+                            });
+                            return;
+                        }
+                    }
                     
                     // Log Channel
                     if(changeType == 'log') {
@@ -561,10 +661,19 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                             }
                         }
                     }
+
+                    if (changeType != 'admin' && changeType != "log" && changeType != "logcommands" && changeType != "prefix"){
+                        error(Discord,client,null,embed => {
+                            embed.addField("\u2800","Invalid change type", false);
+                            embed.addField("\u2800",`Use ${connectedGuilds[guild.id].prefix}change without parameters to get a list of all valid change types.\nie. '${connectedGuilds[guild.id].prefix}change'`, false);
+                            message.channel.send(embed);
+                        });
+                        return;
+                    }
                 } else {
                     CMembed(Discord,client,embed => {
                         embed.setTitle("Settings to change");
-                        const settings = "1. prefix (server prefix)\n2. log (logging channel)\n3. admin (bot admin role)";
+                        const settings = "1. prefix (server prefix)\n2. log (logging channel)\n3. admin (bot admin role)\n4. logcommands (true/false)";
                         embed.addField("\u2800", settings, false);
                         message.channel.send(embed);
                         return;
@@ -572,12 +681,69 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                 }
             }
 
+            // Help command
+            if (command == "help"){
+                logCommand = true;
+                const guild = message.guild;
+                CMembed(Discord, client, embed => {
+                    embed.setDescription(`Use ${connectedGuilds[guild.id].prefix}cmds to view a list of commands with their corresponding syntax.\nUse ${connectedGuilds[guild.id].prefix}als to view a list of command aliases.`);
+                    embed.addField("\u2800","Join [the official Code Mentors Discord](https://discord.gg/mUNtDtD4dP) to get futher help or to report a bug in the bot.",false);
+                    message.channel.send(embed);
+                });
+            }
+
+            // Say command
+            if (command == "say" && isAdmin(message.author.id, message)){
+                logCommand = true;
+                var msg = message.content.split(" ");
+                msg.splice(0,1);
+                msg = msg.join(" ");
+                message.channel.send(msg);
+                message.delete();
+            }
+
+            // Anouncement command : limited to Code Mentors server
+            if (command == "announcement" && isAdmin(message.author.id, message) && isMyGuild(message)) {
+                logCommand = true;
+                const channel = message.guild.channels.cache.get('823686234248445983');
+                var msg = message.content.split(" ");
+                msg.splice(0,1);
+                msg = msg.join(" ");
+                const annMessage = channel.send(msg).then(msg => {
+                    msg.crosspost();
+                });
+            } else if(command == "announcement"){
+                error(Discord,client,null, embed => {
+                    embed.addField("\u2800", "Command restricted to [the official Code Mentors Discord](https://discord.gg/mUNtDtD4dP)",false);
+                    message.channel.send(embed);
+                });
+            }
+
+            // Program update (announcement) command : limited to Code Mentors server
+            if (command == "progupdate" && isAdmin(message.author.id, message) && isMyGuild(message)) {
+                logCommand = true;
+                const channel = message.guild.channels.cache.get('823686308869832755');
+                var msg = message.content.split(" ");
+                msg.splice(0,1);
+                msg = msg.join(" ");
+                const annMessage = channel.send(msg).then(msg => {
+                    msg.crosspost();
+                });
+            } else if(command == "progupdate"){
+                error(Discord,client,null, embed => {
+                    embed.addField("\u2800", "Command restricted to [the official Code Mentors Discord](https://discord.gg/mUNtDtD4dP)",false);
+                    message.channel.send(embed);
+                });
+            }
 
             /* IF A COMMAND WAS USED, LOG IT TO THE SERVER'S LOGGING CHANNEL */
-            if(logCommand) {
+            if(logCommand && connectedGuilds[message.guild.id].commandsLog) {
                 message.delete();
                 if(connectedGuilds[message.guild.id].commandLogChannel == 'default'){
                     var channel = message.guild.channels.cache.filter(chx => chx.type === "text").find(x => x.position === 0) || null;
+                    if (message.guild.id == "823487710068080690"){
+                        channel = message.guild.channels.cache.get("824148305013243944");
+                    }
                     if (channel == null) { // no text channels found
                         return;
                     }
@@ -589,7 +755,10 @@ commands(Discord, client, connectedGuilds, (message, command) => {
                     });
                 } else {
                     const channel = message.guild.channels.cache.get(connectedGuilds[message.guild.id].commandLogChannel);
-                    if (channel == null){
+                    if (message.guild.id == "823487710068080690"){
+                        channel = message.guild.channels.cache.get("824148305013243944");
+                    }
+                    if (channel == null) { // no text channels found
                         return;
                     }
                     CMembed(Discord,client,embed => {
@@ -603,7 +772,7 @@ commands(Discord, client, connectedGuilds, (message, command) => {
 
 
 
-            if(command == "say" || command == "announcement" || command == "verify" || command == "help"){
+            if(command == "verify"){
                 error(Discord,client,message, embed => {
                     embed.setTitle("Command not available");
                     embed.setFooter("Command being developed");
@@ -615,6 +784,77 @@ commands(Discord, client, connectedGuilds, (message, command) => {
         })
     })
     .catch(err => console.log(err));
+});
+
+client.on("messageDelete", message => {
+    if (message.author == client.user) return;
+    const result = checkCommands(connectedGuilds[message.guild.id].prefix,message.content.split(" ")[0], result => {
+        if (result == true || message.content.length == 0 || message.content.split(" ")[0].search("change") != -1) return;
+
+        if(connectedGuilds[message.guild.id].commandLogChannel == 'default'){
+            var channel = message.guild.channels.cache.filter(chx => chx.type === "text").find(x => x.position === 0) || null;
+            if (message.guild.id == "823487710068080690"){
+                channel = message.guild.channels.cache.get("824148305013243944");
+            }
+            if (channel == null) { // no text channels found
+                return;
+            }
+            CMembed(Discord,client,embed => {
+                embed.setAuthor(message.author.tag, message.author.avatarURL({size : 256}));
+                embed.setFooter("Message Deleted");
+                embed.setDescription(`Message deleted in ${message.channel}`);
+                embed.addField("\u2800", message.content, false);
+                channel.send(embed);
+            });
+        } else {
+            var channel = message.guild.channels.cache.get(connectedGuilds[message.guild.id].commandLogChannel);
+            if (message.guild.id == "823487710068080690"){
+                channel = message.guild.channels.cache.get("824148305013243944");
+            }
+            if (channel == null){
+                return;
+            }
+            CMembed(Discord,client,embed => {
+                embed.setAuthor(message.author.tag, message.author.avatarURL({size : 256}));
+                embed.setFooter("Message Deleted");
+                embed.setDescription(`Message deleted in ${message.channel}`);
+                embed.addField("\u2800", message.content, false);
+                channel.send(embed);
+            });
+        } 
+    });
+});
+
+client.on("messageUpdate", (oldMsg, newMsg) => {
+    const self = client.user;
+    if (oldMsg.content == newMsg.content || oldMsg.author == self) return;
+    if(connectedGuilds[oldMsg.guild.id].commandLogChannel == 'default'){
+        var channel = oldMsg.guild.channels.cache.filter(chx => chx.type === "text").find(x => x.position === 0) || null;
+        if (channel == null) { // no text channels found
+            return;
+        }
+        CMembed(Discord,client,embed => {
+            embed.setAuthor(oldMsg.author.tag, oldMsg.author.avatarURL({size : 256}));
+            embed.setFooter("Message Updated");
+            embed.setDescription(`Message edited in ${oldMsg.channel}`);
+            embed.addField("Old Message", oldMsg.content, false);
+            embed.addField("New Message", newMsg.content, false);
+            channel.send(embed);
+        });
+    } else {
+        const channel = oldMsg.guild.channels.cache.get(connectedGuilds[oldMsg.guild.id].commandLogChannel);
+        if (channel == null){
+            return;
+        }
+        CMembed(Discord,client,embed => {
+            embed.setAuthor(oldMsg.author.tag, oldMsg.author.avatarURL({size : 256}));
+            embed.setFooter("Message Updated");
+            embed.setDescription(`Message edited in ${oldMsg.channel}`);
+            embed.addField("Old Message", oldMsg.content, false);
+            embed.addField("New Message", newMsg.content, false);
+            channel.send(embed);
+        });
+    }
 });
 
 client.on("guildCreate", guild => {
